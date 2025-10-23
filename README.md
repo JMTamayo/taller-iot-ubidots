@@ -10,7 +10,7 @@ El objetivo de este trabajo es crear un sistema de monitoreo y control de la hum
 
 La arquitectura del sistema es la siguiente:
 
-- Dispositivo de control de periféricos (Arduino UNO R3): Este dispositivo se encarga de controlar los periféricos de la planta doméstica, como el sensor de humedad del suelo y el actuador que habilita el sistema de bombeo de agua. Ver [r3_controller](r3_controller/r3_controller.ino) para más detalles.
+- Dispositivos de control de periféricos de la finca #1 y finca #2 (Arduino UNO R3): Este dispositivo se encarga de controlar los periféricos de la planta doméstica, como el sensor de humedad del suelo y el actuador que habilita el sistema de bombeo de agua. Ver [r3_controller_1](r3_controller_1/r3_controller_1.ino)  y [r3_controller_2](r3_controller_2/r3_controller_2.ino) para más detalles.
 - Dispositivo de gestión de comunicaciones IoT (ESP32 C3 SUPER MINI): Este dispositivo se encarga de gestionar las comunicaciones IoT, como la conexión a internet vía WiFi y la conexión al servidor MQTT. Adicionalmente, se encarga de enviar y recibir datos de los dispositivos de control de periféricos. Ver [r3_server](r3_server/r3_server.ino) para más detalles.
 
 ## Servicios IoT con Ubidots:
