@@ -9,12 +9,12 @@
   Versión: 1.0.0
 
   Descripción: Obtener datos de humedad y realizar acciones de control de la
-  humedad del suelo en planta doméstica, recibiendo y enviando los datos de
+  humedad del suelo en las plantas, recibiendo y enviando los datos de
   proceso desde y hacia el servidor de Ubidots.
 
   El presente dispositivo realiza la gestión de las comunicaciones. La
   comunicación con Ubidots se establece mediante el protocolo MQTT. Para obtener
-  la humedad y realizar las acciones de control, este dispositivo se comunica
+  la humedad y realizar las acciones de control, los dispositivos se comunica
   con otro via protocolo UART cuya función es el manejo de periféricos.
 
   Se requiere crear un módulo "secrets.h" en el cual se incluyan los secretos
@@ -35,9 +35,9 @@
     - Ubidots: https://ubidots.com
 
   Placa de Desarrollo:
-    - Nombre: ESP32 C3 SUPER MINI
+    - Nombre: ESP32-WROOM-32
     - Documentación:
-  https://randomnerdtutorials.com/getting-started-esp32-c3-super-mini/
+  https://documentation.espressif.com/esp32-wroom-32_datasheet_en.pdf
 */
 
 // Importación de Librerías
@@ -49,11 +49,11 @@
 
 // Etiquetado de Pines I/O:
 #define BUILTIN_LED                                                            \
-  8 // Pin incorporado de la placa para indicar error en comunicaciones
+  2 // Pin incorporado de la placa para indicar error en comunicaciones
 #define CONTROLLER_RX_PIN                                                      \
-  7 // Pin de transmisión de datos via UART con dispositivo de control
+  32 // Pin de transmisión de datos via UART con dispositivo de control
 #define CONTROLLER_TX_PIN                                                      \
-  6 // Pin de transmisión de datos via UART con dispositivo de control
+  33 // Pin de transmisión de datos via UART con dispositivo de control
 
 // Definición de Constantes:
 #define BAUD_RATE 115200 // Velocidad de comunicación serial para depuración
@@ -67,11 +67,12 @@
   "r3-esp32" // Identificador único del dispositivo en servidor MQTT
 #define MQTT_RETRY_MILLISECONDS                                                \
   1000 // Tiempo máximo de espera por conexión exitosa con servidor MQTT
-#define MQTT_TOPIC_ENABLE_WATER_FLOW                                           \
-  "enable-water-flow/lv" // Tópico para habilitar o deshabilitar sistema de
-                         // bombeo de agua
-#define MQTT_TOPIC_SOIL_MOISTURE                                               \
-  "soil-moisture" // Tópico para monitorear humedad del suelo de la planta
+#define MQTT_TOPIC_ENABLE_WATER_FLOW_PUMP                                      \
+  "water-flow-pump/lv" // Tópico para habilitar o deshabilitar sistema de \
+                          // bombeo de agua
+#define MQTT_TOPIC_ENABLE_WATER_FLOW_VALVE                                     \
+  "water-flow-valve/lv" // Tópico para habilitar o deshabilitar sistema de \
+                          // bombeo de agua
 #define MQTT_TOPIC_SOIL_MOISTURE_SAMPLING_TIME_MILLISECONDS                    \
   60000 // Tiempo de muestreo de la humedad de la planta
 
@@ -80,25 +81,45 @@
 #define CONTROLLER_REQUEST_DELAY_MILLISECONDS                                  \
   50 // Tiempo de retardo luego de petición a dispositivo de control
 #define COMMAND_SEPARATOR                                                      \
-  ":" // Separador entre comando y acción, cuya estructura es
-      // {comando}{separador}{acción}
+  ":" // Separador entre comando y acción, cuya estructura es \
+       // {comando}{separador}{acción}
 #define SOIL_MOISTURE_SENSOR_COMMAND                                           \
-  "soil-moisture-sensor" // Comando para obtener medidas del sensor de humedad
-                         // del suelo
-#define WATER_FLOW_ACTUATOR_COMMAND                                            \
-  "water-flow-actuator" // Comando para habilitar sistema de bombeo de agua a la
-                        // planta
+  "soil-moisture-sensor" // Comando para obtener medidas del sensor de humedad \
+                          // del suelo
+#define WATER_FLOW_PUMP_COMMAND                                                \
+  "water-flow-pump" // Comando para habilitar sistema de bombeo de agua a la \
+                         // planta en la finca F1
+#define WATER_FLOW_VALVE_COMMAND                                               \
+  "water-flow-valve" // Comando para habilitar sistema de bombeo de agua a la \
+                         // planta en la finca F2
 
 // Definición de Variables:
 WiFiClient espClient = WiFiClient();
 PubSubClient mqttClient = PubSubClient(espClient);
 
-String enableWaterFlowTopic =
-    String(MQTT_TOPIC_BASE) + "/" + String(MQTT_TOPIC_ENABLE_WATER_FLOW);
-String soilMoistureTopic =
-    String(MQTT_TOPIC_BASE) + "/" + String(MQTT_TOPIC_SOIL_MOISTURE);
+String enableWaterFlowPumpTopic =
+    String(MQTT_TOPIC_BASE) + "/" + String(MQTT_TOPIC_ENABLE_WATER_FLOW_PUMP);
 
-unsigned long lastSoilMoistureSample = 0;
+String enableWaterFlowValveTopic =
+    String(MQTT_TOPIC_BASE) + "/" + String(MQTT_TOPIC_ENABLE_WATER_FLOW_VALVE);
+
+unsigned long lastSoilMoistureSampleTime = 0;
+
+class Measurement {
+private:
+  String variable;
+  float value;
+
+public:
+  Measurement(String variable, float value)
+      : variable(variable), value(value) {}
+
+  ~Measurement() {}
+
+  String GetVariable() { return this->variable; }
+
+  float GetValue() { return this->value; }
+};
 
 // Definición de Subrutinas y Funciones:
 
@@ -152,7 +173,8 @@ void connectToMqtt() {
 
   while (!mqttClient.connected()) {
     if (mqttClient.connect(MQTT_CLIENT_ID, MQTT_USER, MQTT_PASSWORD)) {
-      mqttClient.subscribe(enableWaterFlowTopic.c_str());
+      mqttClient.subscribe(enableWaterFlowPumpTopic.c_str());
+      mqttClient.subscribe(enableWaterFlowValveTopic.c_str());
       break;
     }
 
@@ -182,14 +204,22 @@ void mqttSubscriptionCallback(char *topic, byte *payload, unsigned int length) {
   String payloadString = (char *)payload;
   payloadString.remove(length);
 
-  if (topicStr.equals(enableWaterFlowTopic) &&
+  if (topicStr.equals(enableWaterFlowPumpTopic) &&
       (payloadString.equals("0") || payloadString.equals("1") ||
        payloadString.equals("0.0") || payloadString.equals("1.0"))) {
     Serial.println("Received message from MQTT server. Topic: " + topicStr +
                    ". Payload: " + payloadString);
     bool action = payloadString.toInt() == 1 ? true : false;
-    enableWaterFlowActuator(action);
+    enableWaterFlowActuator(WATER_FLOW_PUMP_COMMAND, action);
+  }
 
+  else if (topicStr.equals(enableWaterFlowValveTopic) &&
+           (payloadString.equals("0") || payloadString.equals("1") ||
+            payloadString.equals("0.0") || payloadString.equals("1.0"))) {
+    Serial.println("Received message from MQTT server. Topic: " + topicStr +
+                   ". Payload: " + payloadString);
+    bool action = payloadString.toInt() == 1 ? true : false;
+    enableWaterFlowActuator(WATER_FLOW_VALVE_COMMAND, action);
   } else {
     Serial.println(
         "Received unimplemented message from MQTT server. Topic: " + topicStr +
@@ -206,34 +236,47 @@ void mqttSubscriptionCallback(char *topic, byte *payload, unsigned int length) {
   placa, el cual tiene lógica invertida.
 */
 void lightOnLed(bool on) {
-  unsigned int action = on ? LOW : HIGH;
+  unsigned int action = on ? HIGH : LOW;
   digitalWrite(BUILTIN_LED, action);
 }
 
 /*
   Enviar Solicitud para Encendido de Sistema de Bombeo
 
-  Descripción: Envía petición a dispositivo de control para activar o desactivar
-  el sistema de bombeo de agua para la planta. La comunicación se realiza vía
-  UART.
+  Descripción: Envía petición a los dispositivo de control para activar o
+  desactivar el sistema de bombeo de agua para la planta. La comunicación se
+  realiza vía UART.
 */
-void enableWaterFlowActuator(bool on) {
+void enableWaterFlowActuator(String command, bool on) {
   String action = on ? "1" : "0";
-  Serial1.println(WATER_FLOW_ACTUATOR_COMMAND + String(COMMAND_SEPARATOR) +
-                  action);
+  Serial1.println(command + String(COMMAND_SEPARATOR) + action);
 }
 
 /*
   Enviar Solicitud para Monitorear la Humedad del Suelo
 
-  Descripción: Envía petición a dispositivo de control para obtener datos de la
-  humedad del suelo de la planta. La comunicación se realiza vía UART.
+  Descripción: Envía petición a los dispositivos de control para obtener datos
+  de la humedad del suelo de las plantas. La comunicación se realiza vía UART.
 */
-float soilMoistureRequest() {
+void soilMoistureRequest() {
   String action = "1";
-  Serial1.println(SOIL_MOISTURE_SENSOR_COMMAND + String(COMMAND_SEPARATOR) +
-                  action);
+  String command =
+      SOIL_MOISTURE_SENSOR_COMMAND + String(COMMAND_SEPARATOR) + action;
+
+  Serial1.println(command);
   delay(CONTROLLER_REQUEST_DELAY_MILLISECONDS);
+}
+
+/*
+  Recibir respuesta de dispositivos de control
+
+  Descripción: Recibe respuesta de los dispositivos de control y la retorna
+  como objeto Measurement. Si no se recibe respuesta en el tiempo establecido,
+  se devuelve un puntero nulo. La respuesta debe estar en el formato
+  {comando}{separador}{acción}.
+*/
+Measurement incomingData() {
+  Measurement measurement = Measurement("", 0);
 
   const unsigned long startTime = millis();
   while (millis() - startTime < CONTROLLER_TIMEOUT_MILLISECONDS) {
@@ -247,7 +290,6 @@ float soilMoistureRequest() {
         Serial.println("The response could not be interpreted, it must be in "
                        "the format {command}" +
                        String(COMMAND_SEPARATOR) + "{value}");
-        return NAN;
       }
 
       String responseCommand = response.substring(0, separatorIndex);
@@ -255,13 +297,12 @@ float soilMoistureRequest() {
 
       String responseValueString = response.substring(separatorIndex + 1);
       responseValueString.trim();
-      return responseValueString.toFloat();
+
+      measurement = Measurement(responseCommand, responseValueString.toFloat());
     }
   }
 
-  Serial.print("error:");
-  Serial.println("Timeout waiting for controller response");
-  return NAN;
+  return measurement;
 }
 
 // Subrutina para Configuración del Proceso a Ejecutar:
@@ -286,7 +327,7 @@ void setup() {
   mqttClient.setServer(MQTT_SERVER, MQTT_PORT);
 
   // Inicio de variables de proceso:
-  lastSoilMoistureSample =
+  lastSoilMoistureSampleTime =
       millis() - MQTT_TOPIC_SOIL_MOISTURE_SAMPLING_TIME_MILLISECONDS;
 }
 
@@ -300,16 +341,28 @@ void loop() {
     connectToMqtt();
 
   } else {
-    if (millis() - lastSoilMoistureSample >=
-        MQTT_TOPIC_SOIL_MOISTURE_SAMPLING_TIME_MILLISECONDS) {
-      float soilMoisture = soilMoistureRequest();
-      if (!isnan(soilMoisture))
-        mqttClient.publish(soilMoistureTopic.c_str(),
-                           String(soilMoisture).c_str());
+    mqttClient.loop();
 
-      lastSoilMoistureSample = millis();
+    if (millis() - lastSoilMoistureSampleTime >=
+        MQTT_TOPIC_SOIL_MOISTURE_SAMPLING_TIME_MILLISECONDS) {
+      soilMoistureRequest();
+      lastSoilMoistureSampleTime = millis();
+    }
+
+    bool readIncomingData = true;
+    while (readIncomingData) {
+      Measurement measurement = incomingData();
+      if (!measurement.GetVariable().isEmpty()) {
+        String("here");
+        String topic =
+            String(MQTT_TOPIC_BASE) + String("/") + measurement.GetVariable();
+        mqttClient.publish(topic.c_str(),
+                           String(measurement.GetValue()).c_str());
+
+        lastSoilMoistureSampleTime = millis();
+      } else {
+        readIncomingData = false;
+      }
     }
   }
-
-  mqttClient.loop();
 }

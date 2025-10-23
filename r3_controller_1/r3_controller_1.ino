@@ -37,15 +37,17 @@
 #define BAUD_RATE                                                              \
   9600 // Velocidad de comunicación serial con dispositivo principal
 
+#define FARM_ID "f1" // Identificador único de la finca
+
 #define SOIL_MOISTURE_SENSOR_COMMAND                                           \
-  "soil-moisture-sensor" // Comando para obtener medidas del sensor de humedad
-                         // del suelo
+  "soil-moisture-sensor" // Comando para obtener medidas del sensor de humedad \
+                          // del suelo
 #define WATER_FLOW_ACTUATOR_COMMAND                                            \
-  "water-flow-actuator" // Comando para habilitar sistema de bombeo de agua a la
-                        // planta
+  "water-flow-pump" // Comando para habilitar sistema de bombeo de agua a la \
+                     // planta
 #define COMMAND_SEPARATOR                                                      \
-  ":" // Separador entre comando y acción, cuya estructura es
-      // {comando}{separador}{acción}
+  ":" // Separador entre comando y acción, cuya estructura es \
+       // {comando}{separador}{acción}
 
 #define SOIL_MOISTURE_SENSOR_MIN_VALUE                                         \
   245 // Valor mínimo del sensor de humedad, medido en agua
@@ -128,8 +130,8 @@ void loop() {
                         SOIL_MOISTURE_READING_RANGE);
         float moisture = 100.0f * constrain(normalizedValue, 0.0f, 1.0f);
 
-        Serial.println(requestCommand + COMMAND_SEPARATOR +
-                       String(moisture, 2));
+        Serial.println(requestCommand + String("-") + FARM_ID +
+                       COMMAND_SEPARATOR + String(moisture, 2));
       }
     }
   }
